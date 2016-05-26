@@ -1,4 +1,4 @@
-# xposed_youtube-swipe-to-seek
+# Youtube swipe to seek
 ## About
 This is a Xposed Module. I wrote it for my own purpose.
 Swipe left-right to seek, swipe up-down to change volume in youtube video player. Changing volume only works if you're in full screen mode.
