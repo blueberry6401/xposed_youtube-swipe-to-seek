@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">YoutubeSwipeToSeek</string>
+    <string name="toast_volume">"Volume: %d"</string>
+</resources>
