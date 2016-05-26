@@ -1,6 +1,7 @@
 package com.blueberry.youtubeswipetoseek;
 
 import android.content.Context;
+import android.content.res.Resources;
 import android.media.AudioManager;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
@@ -27,6 +28,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
     private AudioManager mAudioManager;
     private Toast mInfoToast;
     private boolean mIsTouchEventDispatched;
+    private Resources mModuleResources;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam loadPackageParam) throws Throwable {
@@ -42,6 +44,10 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         mYoutubeMediaController = (MediaController) param.thisObject;
+                        if (mModuleResources == null) {
+                            mModuleResources = Utils.getModuleContext((Context) param.args[0])
+                                    .getResources();
+                        }
                         if (DEBUG) XposedBridge.log(TAG + ": got youtube media controller, null: " + String.valueOf(mYoutubeMediaController == null));
                     }
                 });
@@ -112,7 +118,8 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                                 newVolume = Math.min(newVolume, maxMusicVolume);
                                 mAudioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolume, 0);
                                 // Show toast
-                                mInfoToast.setText("Volume: " + newVolume);
+                                mInfoToast.setText(
+                                        mModuleResources.getString(R.string.toast_volume, newVolume));
                                 mInfoToast.show();
                             }
 
