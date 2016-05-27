@@ -1,6 +1,9 @@
 package com.blueberry.youtubeswipetoseek;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Resources;
 import android.media.AudioManager;
 import android.media.MediaMetadata;
@@ -9,9 +12,11 @@ import android.media.session.PlaybackState;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.widget.Toast;
+import static com.blueberry.youtubeswipetoseek.SettingsActivity.*;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XSharedPreferences;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
@@ -20,20 +25,39 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  * Created by hieptran on 24/05/2016.
  */
 
-public class YoutubeHooker implements IXposedHookLoadPackage {
+public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadPackage {
     private final boolean DEBUG = BuildConfig.DEBUG;
     private final String TAG = getClass().getSimpleName();
+    private final String PACKAGE_NAME = YoutubeHooker.class.getPackage().getName();
+
     private MediaController mYoutubeMediaController;
     private SwipeDetector mYoutubeVideoSwipeDetector;
     private AudioManager mAudioManager;
     private Toast mInfoToast;
     private boolean mIsTouchEventDispatched;
     private Resources mModuleResources;
+    private XSharedPreferences mPrefs;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam loadPackageParam) throws Throwable {
         if (loadPackageParam.packageName.equals("com.google.android.youtube")) {
             hookYoutubeSwipeToSeek(loadPackageParam);
+        }
+    }
+
+    private void initPrefs(Context c) {
+        mPrefs = new XSharedPreferences(PACKAGE_NAME);
+        mPrefs.reload();
+
+        c.registerReceiver(this, new IntentFilter(SettingsActivity.ACTION_SETTINGS_CHANGED));
+    }
+
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        String action = intent.getAction();
+        if (action.equals(SettingsActivity.ACTION_SETTINGS_CHANGED)) {
+            if (DEBUG) XposedBridge.log(TAG + ": reload settings");
+            if (mPrefs != null) mPrefs.reload();
         }
     }
 
@@ -44,10 +68,12 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         mYoutubeMediaController = (MediaController) param.thisObject;
+                        Context context = (Context) param.args[0];
                         if (mModuleResources == null) {
-                            mModuleResources = Utils.getModuleContext((Context) param.args[0])
-                                    .getResources();
+                            mModuleResources = Utils.getModuleContext(context).getResources();
                         }
+                        initPrefs(context);
+
                         if (DEBUG) XposedBridge.log(TAG + ": got youtube media controller, null: " + String.valueOf(mYoutubeMediaController == null));
                     }
                 });
@@ -72,6 +98,8 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                             String currentVideoDurationString;
                             // Volume
                             int maxMusicVolume, currentMusicVolume;
+                            // Settings boolean
+                            boolean isSeekingEnabled, isChangingVolumeEnabled;
 
                             @Override
                             public void swipeX(int mm) {
@@ -80,6 +108,9 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                                     mInfoToast.setDuration(Toast.LENGTH_LONG);
                                 }
                                 if (swipeDirection == SwipeDetector.Direction.VERTICAL) return;
+                                if (!isSeekingEnabled) return;
+                                // mIsTouchEventDispatched will be true if youtube's view has handled
+                                // the touch event
                                 if (mIsTouchEventDispatched) return;
 
                                 int secsToSeek = (int) (mm / 1.5);
@@ -109,9 +140,10 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                                     swipeDirection = SwipeDetector.Direction.VERTICAL;
                                     mInfoToast.setDuration(Toast.LENGTH_SHORT);
                                 }
+                                if (!isChangingVolumeEnabled) return;
                                 if (swipeDirection == SwipeDetector.Direction.HORIZONTAL) return;
 
-                                int volumeDelta = -mm / 3;
+                                int volumeDelta = -mm / 3; // Invert: up to increase volume, and otherwise
                                 if (DEBUG) XposedBridge.log(TAG + ": swipe " + mm + ", volume " + volumeDelta);
                                 int newVolume = currentMusicVolume + volumeDelta;
                                 newVolume = Math.max(0, newVolume);
@@ -146,6 +178,8 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
 
                                         // Init vars
                                         swipeDirection = null;
+                                        isSeekingEnabled = mPrefs.getBoolean(PREF_SWIPE_TO_SEEK, true);
+                                        isChangingVolumeEnabled = mPrefs.getBoolean(PREF_SWIPE_TO_CHANGE_VOLUME, true);
                                         maxMusicVolume = mAudioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
                                         currentMusicVolume = mAudioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
                                         currentPos = -1;
