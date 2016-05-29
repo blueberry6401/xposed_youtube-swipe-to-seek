@@ -12,6 +12,9 @@ import android.media.session.PlaybackState;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.widget.Toast;
+
+import java.util.Map;
+
 import static com.blueberry.youtubeswipetoseek.SettingsActivity.*;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -37,6 +40,8 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
     private boolean mIsTouchEventDispatched;
     private Resources mModuleResources;
     private XSharedPreferences mPrefs;
+    // Settings boolean
+    boolean mIsSeekingEnabled, mIsChangingVolumeEnabled;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam loadPackageParam) throws Throwable {
@@ -45,48 +50,44 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
         }
     }
 
-    private void initPrefs(Context c) {
-        mPrefs = new XSharedPreferences(PACKAGE_NAME);
-        mPrefs.reload();
-
-        c.registerReceiver(this, new IntentFilter(SettingsActivity.ACTION_SETTINGS_CHANGED));
-    }
-
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
         if (action.equals(SettingsActivity.ACTION_SETTINGS_CHANGED)) {
             if (DEBUG) XposedBridge.log(TAG + ": reload settings");
-            if (mPrefs != null) mPrefs.reload();
+
+            if (intent.hasExtra(PREF_SWIPE_TO_SEEK)) {
+                mIsSeekingEnabled = intent.getBooleanExtra(PREF_SWIPE_TO_SEEK, false);
+            } else if (intent.hasExtra(PREF_SWIPE_TO_CHANGE_VOLUME)) {
+                mIsChangingVolumeEnabled = intent.getBooleanExtra(PREF_SWIPE_TO_CHANGE_VOLUME, false);
+            }
+            if (DEBUG) XposedBridge.log(String.format("%s: allow seek %s, allow change vol %s", TAG, String.valueOf(mIsSeekingEnabled), String.valueOf(mIsChangingVolumeEnabled)));
         }
     }
 
     private void hookYoutubeSwipeToSeek(XC_LoadPackage.LoadPackageParam loadPackageParam) {
-        // Get MediaController
-        XposedHelpers.findAndHookConstructor("android.media.session.MediaController", loadPackageParam.classLoader,
-                Context.class, "android.media.session.MediaSession$Token", new XC_MethodHook() {
+        // Preferences
+        initPrefs();
+
+        // Hook YouTubeApplication to register settings broadcast listener, create SwipeDetector
+        XposedHelpers.findAndHookMethod("com.google.android.apps.youtube.app.YouTubeApplication", loadPackageParam.classLoader,
+                "onCreate", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        mYoutubeMediaController = (MediaController) param.thisObject;
-                        Context context = (Context) param.args[0];
+                        Context c = (Context) XposedHelpers.callMethod(param.thisObject, "getApplicationContext");
+                        c.registerReceiver(YoutubeHooker.this, new IntentFilter(SettingsActivity.ACTION_SETTINGS_CHANGED));
+
+                        // Create module resources to access resources of module
                         if (mModuleResources == null) {
-                            mModuleResources = Utils.getModuleContext(context).getResources();
+                            mModuleResources = Utils.getModuleContext(c).getResources();
                         }
-                        initPrefs(context);
 
-                        if (DEBUG) XposedBridge.log(TAG + ": got youtube media controller, null: " + String.valueOf(mYoutubeMediaController == null));
-                    }
-                });
-
-        XposedBridge.hookAllConstructors(XposedHelpers.findClass("com.google.android.apps.youtube.app.player.YouTubePlayerView", loadPackageParam.classLoader),
-                new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        final Context c = (Context) param.args[0];
+                        //
                         mInfoToast = Toast.makeText(c, "", Toast.LENGTH_LONG);
                         mAudioManager = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
 
-                        mYoutubeVideoSwipeDetector = new SwipeDetector(c.getResources(), new SwipeDetector.OnSwipe() {
+                        // Make SwipeDetector to listen touch event
+                        SwipeDetector.OnSwipe onYoutubeVideoSwipe = new SwipeDetector.OnSwipe() {
                             PlaybackState currentVideoPlaybackState;
                             SwipeDetector.Direction swipeDirection;
                             long currentVideoDuration;
@@ -98,8 +99,6 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
                             String currentVideoDurationString;
                             // Volume
                             int maxMusicVolume, currentMusicVolume;
-                            // Settings boolean
-                            boolean isSeekingEnabled, isChangingVolumeEnabled;
 
                             @Override
                             public void swipeX(int mm) {
@@ -108,16 +107,19 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
                                     mInfoToast.setDuration(Toast.LENGTH_LONG);
                                 }
                                 if (swipeDirection == SwipeDetector.Direction.VERTICAL) return;
-                                if (!isSeekingEnabled) return;
+                                if (!mIsSeekingEnabled) return;
                                 // mIsTouchEventDispatched will be true if youtube's view has handled
                                 // the touch event
                                 if (mIsTouchEventDispatched) return;
 
                                 int secsToSeek = (int) (mm / 1.5);
-                                if (DEBUG) XposedBridge.log(TAG + ": swipe " + mm + ", seek " + secsToSeek);
+                                if (DEBUG) {
+                                    XposedBridge.log(TAG + ": swipe " + mm + ", seek " + secsToSeek);
+                                }
 
                                 long newPos = onStartPosition + secsToSeek * 1000;
-                                newPos = Math.max(0, newPos); newPos = Math.min(newPos, currentVideoDuration - 500);
+                                newPos = Math.max(0, newPos);
+                                newPos = Math.min(newPos, currentVideoDuration - 500);
                                 if (newPos != currentPos) {
                                     mYoutubeMediaController.getTransportControls().seekTo(newPos);
                                     currentPos = newPos;
@@ -140,11 +142,12 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
                                     swipeDirection = SwipeDetector.Direction.VERTICAL;
                                     mInfoToast.setDuration(Toast.LENGTH_SHORT);
                                 }
-                                if (!isChangingVolumeEnabled) return;
+                                if (!mIsChangingVolumeEnabled) return;
                                 if (swipeDirection == SwipeDetector.Direction.HORIZONTAL) return;
 
                                 int volumeDelta = -mm / 3; // Invert: up to increase volume, and otherwise
-                                if (DEBUG) XposedBridge.log(TAG + ": swipe " + mm + ", volume " + volumeDelta);
+                                if (DEBUG)
+                                    XposedBridge.log(TAG + ": swipe " + mm + ", volume " + volumeDelta);
                                 int newVolume = currentMusicVolume + volumeDelta;
                                 newVolume = Math.max(0, newVolume);
                                 newVolume = Math.min(newVolume, maxMusicVolume);
@@ -178,8 +181,6 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
 
                                         // Init vars
                                         swipeDirection = null;
-                                        isSeekingEnabled = mPrefs.getBoolean(PREF_SWIPE_TO_SEEK, true);
-                                        isChangingVolumeEnabled = mPrefs.getBoolean(PREF_SWIPE_TO_CHANGE_VOLUME, true);
                                         maxMusicVolume = mAudioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
                                         currentMusicVolume = mAudioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
                                         currentPos = -1;
@@ -189,9 +190,22 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
                                 }
                                 return false;
                             }
-                        });
+                        };
+                        mYoutubeVideoSwipeDetector = new SwipeDetector(c.getResources(), onYoutubeVideoSwipe);
                     }
                 });
+
+        // Get MediaController
+        XposedHelpers.findAndHookConstructor("android.media.session.MediaController", loadPackageParam.classLoader,
+                Context.class, "android.media.session.MediaSession$Token", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        mYoutubeMediaController = (MediaController) param.thisObject;
+
+                        if (DEBUG) XposedBridge.log(TAG + ": got youtube media controller, null: " + String.valueOf(mYoutubeMediaController == null));
+                    }
+                });
+
         // Receive touch events
         XposedHelpers.findAndHookMethod("com.google.android.apps.youtube.app.player.YouTubePlayerView", loadPackageParam.classLoader,
                 "dispatchTouchEvent", MotionEvent.class,
@@ -201,9 +215,7 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
                         mIsTouchEventDispatched = (boolean) param.getResult();
 
                         MotionEvent motionEvent = (MotionEvent) param.args[0];
-//                        if (motionEvent.getAction() != MotionEvent.ACTION_DOWN) {
-                            mYoutubeVideoSwipeDetector.onEvent(motionEvent);
-//                        }
+                        mYoutubeVideoSwipeDetector.onEvent(motionEvent);
                     }
                 });
 
@@ -224,6 +236,15 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
 //                        }
 //                    }
 //                });
+    }
+
+    private void initPrefs() {
+        if (mPrefs == null) mPrefs = new XSharedPreferences(PACKAGE_NAME);
+        mPrefs.makeWorldReadable();
+        mPrefs.reload();
+
+        mIsSeekingEnabled = mPrefs.getBoolean(PREF_SWIPE_TO_SEEK, true);
+        mIsChangingVolumeEnabled = mPrefs.getBoolean(PREF_SWIPE_TO_CHANGE_VOLUME, true);
     }
 
     private String millisToTimeString(long millis) {

@@ -46,9 +46,21 @@ public class SettingsActivity extends PreferenceActivity {
         @Override
         public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String s) {
             // Send a broadcast to reload settings
-            getActivity().sendBroadcast(
-                    new Intent(ACTION_SETTINGS_CHANGED)
-            );
+            // TODO
+            // Idk why if I call XSharedPreferences.reload in the runtime, it won't have any entries
+            // http://forum.xda-developers.com/xposed/development-xsharedpreferences-issue-t2931396
+            // https://github.com/rovo89/XposedBridge/issues/56
+            // New settings are put directly in intent
+            getActivity().sendBroadcast(makeSettingsUpdateIntent(sharedPreferences, s));
+        }
+
+        private Intent makeSettingsUpdateIntent(SharedPreferences sharedPreferences, String key) {
+            Intent i = new Intent(ACTION_SETTINGS_CHANGED);
+
+            if (key.equals(PREF_SWIPE_TO_CHANGE_VOLUME) || key.equals(PREF_SWIPE_TO_SEEK)) {
+                i.putExtra(key, sharedPreferences.getBoolean(key, false));
+            }
+            return i;
         }
     }
 }
