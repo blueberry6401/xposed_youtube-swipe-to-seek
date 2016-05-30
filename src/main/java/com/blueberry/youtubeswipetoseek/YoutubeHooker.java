@@ -124,6 +124,8 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
                                     mYoutubeMediaController.getTransportControls().seekTo(newPos);
                                     currentPos = newPos;
                                 }
+                                // Recalculate after modify newPost
+                                secsToSeek = (int) ((newPos - onStartPosition) / 1000);
 
                                 // Show toast
                                 String timeinfo = String.format("[%c%ds] (%d%%)\n(%s / %s)",
