@@ -44,6 +44,8 @@ public class SettingsActivity extends PreferenceActivity {
             case R.id.source_github:
                 openUrlInBrowser("https://github.com/blueberry6401/xposed_youtube-swipe-to-seek");
                 break;
+            default:
+                return super.onOptionsItemSelected(item);
         }
         return true;
     }
