@@ -2,4 +2,6 @@
     <string name="app_name">YoutubeSwipeToSeek</string>
     <string name="toast_volume">"Volume: %d"</string>
     <string name="settings_activity">Settings</string>
+    <string name="donate_paypal">Donate via Paypal</string>
+    <string name="source_github">Github page</string>
 </resources>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/donate_paypal"
+        android:icon="@drawable/ic_paypal"
+        android:title="@string/donate_paypal"
+        android:showAsAction="always" />
+    <item
+        android:id="@+id/source_github"
+        android:title="@string/source_github"
+        android:showAsAction="never" />
+</menu>
