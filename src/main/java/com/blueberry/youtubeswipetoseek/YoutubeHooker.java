@@ -10,6 +10,8 @@ import android.media.AudioManager;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.PlaybackState;
+import android.os.Handler;
+import android.os.Message;
 import android.util.DisplayMetrics;
 import android.view.MotionEvent;
 import android.view.View;
@@ -34,6 +36,8 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
     private final String TAG = getClass().getSimpleName();
     private final String PACKAGE_NAME = YoutubeHooker.class.getPackage().getName();
 
+    private final int MSG_SEEK = 1;
+
     private MediaController mYoutubeMediaController;
     private SwipeDetector mYoutubeVideoSwipeDetector;
     private AudioManager mAudioManager;
@@ -44,6 +48,7 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
     private View mYoutubePlayerView;
     // Settings boolean
     boolean mIsSeekingEnabled, mIsChangingVolumeEnabled;
+    private Handler mHandler;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam loadPackageParam) throws Throwable {
@@ -97,7 +102,7 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
                             // Position of video playback when touch
                             long onStartPosition;
                             // Keep the current position of playback when swiping
-                            long currentPos;
+                            long currentPos, newPos;
                             // Cache video's duration in string to show on toast while swiping
                             String currentVideoDurationString;
                             // Volume
@@ -120,11 +125,12 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
                                     XposedBridge.log(TAG + ": swipe " + mm + ", seek " + secsToSeek);
                                 }
 
-                                long newPos = onStartPosition + secsToSeek * 1000;
+                                newPos =  onStartPosition + secsToSeek * 1000;
                                 newPos = Math.max(0, newPos);
                                 newPos = Math.min(newPos, currentVideoDuration - 500);
                                 if (newPos != currentPos) {
-                                    mYoutubeMediaController.getTransportControls().seekTo(newPos);
+                                    Message seekMsg = mHandler.obtainMessage(MSG_SEEK, newPos);
+                                    mHandler.sendMessageDelayed(seekMsg, 500);
                                     currentPos = newPos;
                                 }
                                 // Recalculate after modify newPost
@@ -166,6 +172,12 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
 
                             @Override
                             public void onSwipeStop() {
+                                // Seek immediately
+                                if (swipeDirection != null && swipeDirection == SwipeDetector.Direction.HORIZONTAL) {
+                                    Message seekMsg = mHandler.obtainMessage(MSG_SEEK, newPos);
+                                    mHandler.sendMessage(seekMsg);
+                                }
+
                                 mInfoToast.cancel();
                                 currentPos = -1;
                                 if (DEBUG) XposedBridge.log(TAG + "swipe stopped");
@@ -228,6 +240,18 @@ public class YoutubeHooker extends BroadcastReceiver implements IXposedHookLoadP
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                 mYoutubePlayerView = (View) param.thisObject;
+
+                mHandler = new Handler() {
+                    @Override
+                    public void handleMessage(Message msg) {
+                        switch (msg.what) {
+                            case MSG_SEEK:
+                                if (hasMessages(MSG_SEEK)) removeMessages(MSG_SEEK);
+                                mYoutubeMediaController.getTransportControls().seekTo((Long) msg.obj);
+                                break;
+                        }
+                    }
+                };
             }
         });
         // Receive touch events
