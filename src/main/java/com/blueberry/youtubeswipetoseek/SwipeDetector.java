@@ -13,7 +13,7 @@ public class SwipeDetector {
     private final boolean DEBUG = true;
     private final int SWIPE_THRESHOLD_MM = 2;
 
-    private boolean isSwiping = false;
+    private boolean isSwiping = false, isCanceled = false;
     private OnSwipe mOnSwipe;
 
     private int oriX, oriY;
@@ -32,19 +32,26 @@ public class SwipeDetector {
 
         switch (action) {
             case MotionEvent.ACTION_DOWN:
-                oriX = (int) motionEvent.getRawX();
-                oriY = (int) motionEvent.getRawY();
+                if (isCanceled) return;
+                oriX = (int) motionEvent.getX();
+                oriY = (int) motionEvent.getY();
+                if (!mOnSwipe.onTouchedDown(oriX, oriY)) {
+                    isCanceled = true;
+                    return;
+                }
                 isSwiping = false;
                 break;
 
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 if (isSwiping) mOnSwipe.onSwipeStop();
+                isCanceled = false;
                 break;
 
             case MotionEvent.ACTION_MOVE:
-                int currentX = (int) motionEvent.getRawX();
-                int currentY = (int) motionEvent.getRawY();
+                if (isCanceled) return;
+                int currentX = (int) motionEvent.getX();
+                int currentY = (int) motionEvent.getY();
                 int xMm = (int) ((currentX - oriX) / mmToPx);
                 int yMm = (int) ((currentY - oriY) / mmToPx);
                 int xMmAbs = Math.abs(xMm);
@@ -67,8 +74,6 @@ public class SwipeDetector {
                         mOldYSwipeMm = yMm;
                     }
                 }
-
-
                 break;
         }
     }
@@ -76,6 +81,14 @@ public class SwipeDetector {
     interface OnSwipe {
         void swipeX(int mm);
         void swipeY(int mm);
+
+        /**
+         *
+         * @param x
+         * @param y
+         * @return false if touch event is canceled
+         */
+        boolean onTouchedDown(int x, int y);
         void onSwipeStop();
         boolean onSwipeStart();
     }

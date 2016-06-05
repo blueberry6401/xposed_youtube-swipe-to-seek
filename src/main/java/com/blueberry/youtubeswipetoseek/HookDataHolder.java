@@ -12,13 +12,14 @@ import de.robv.android.xposed.XSharedPreferences;
  * Created by hieptran on 05/06/2016.
  */
 public class HookDataHolder {
-    MediaController mYoutubeMediaController;
-    SwipeDetector mYoutubeVideoSwipeDetector;
-    AudioManager mAudioManager;
-    Toast mInfoToast;
-    boolean mIsTouchEventDispatched;
-    View mYoutubePlayerView;
+    MediaController youtubeMediaController;
+    SwipeDetector youtubeVideoSwipeDetector;
+    AudioManager audioManager;
+    Toast infoToast;
+    boolean isTouchEventDispatched;
+    boolean isFullscreen;
+    View youtubePlayerView;
     // Settings boolean
-    boolean mIsSeekingEnabled, mIsChangingVolumeEnabled;
-    Handler mHandler;
+    boolean isSeekingEnabled, isChangingVolumeEnabled;
+    Handler handler;
 }
