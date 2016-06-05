@@ -15,3 +15,7 @@
 #-keepclassmembers class fqcn.of.javascript.interface.for.webview {
 #   public *;
 #}
+-keep class com.blueberry.youtubeswipetoseek.YoutubeHooker{*;}
+-keepnames class com.blueberry.youtubeswipetoseek.YoutubeHooker
+-keep class de.robv.android.xposed.**{*;}
+-keepnames class de.robv.android.xposed.**

@@ -17,6 +17,8 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Toast;
 
+import java.util.Arrays;
+
 import static com.blueberry.youtubeswipetoseek.SettingsActivity.*;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -32,19 +34,23 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public class YoutubeHooker implements IXposedHookLoadPackage {
     private static final String[] SUPPORT_YOUTUBE_PACKAGE = new String[] {
-            "com.google.android.youtube",
-            "com.google.android.ogyoutube"
+            "com.google.android.youtube"
+//            "com.google.android.apps.youtube.gaming",
+//            "com.google.android.ogyoutube"
     };
     private static final String[] CLASS_APPLICATION = new String[]{
             "com.google.android.apps.youtube.app.YouTubeApplication",
+            "com.google.android.apps.youtube.gaming.application.GamingApplication",
             "com.google.android.apps.ogyoutube.app.YouTubeApplication"
     };
     private static final String[] CLASS_MEDIA_CONTROLLER = new String[] {
-        "android.media.session.MediaController",
-                "android.media.session.MediaController"
+            "android.media.session.MediaController",
+            "android.media.session.MediaController",
+            "android.media.session.MediaController"
     };
     private static final String[] CLASS_PLAYER_VIEW = new String[]{
             "com.google.android.apps.youtube.app.player.YouTubePlayerView",
+            "com.google.android.apps.youtube.gaming.player.GamingPlayerView",
             "com.google.android.apps.ogyoutube.app.player.YouTubePlayerView"
     };
     private static HookDataHolder[] mHookDataHolder = new HookDataHolder[SUPPORT_YOUTUBE_PACKAGE.length];
@@ -193,6 +199,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
 
                             @Override
                             public boolean onTouchedDown(int x, int y) {
+                                if (DEBUG) XposedBridge.log(TAG + ": " + Arrays.toString(Thread.currentThread().getStackTrace()));
                                 // Get screen size to know if player is in fullscreen mode
                                 DisplayMetrics displayMetrics = hookDataHolder.youtubePlayerView.getResources().getDisplayMetrics();
                                 int scrHeight = displayMetrics.heightPixels;
