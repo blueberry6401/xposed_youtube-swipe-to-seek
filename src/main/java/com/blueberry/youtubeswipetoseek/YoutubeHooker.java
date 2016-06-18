@@ -4,7 +4,9 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.content.res.Resources;
+import android.content.res.XResources;
 import android.media.AudioManager;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
@@ -12,31 +14,39 @@ import android.media.session.PlaybackState;
 import android.os.Handler;
 import android.os.Message;
 import android.util.DisplayMetrics;
+import android.util.Pair;
 import android.util.TypedValue;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Toast;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
 
 import static com.blueberry.youtubeswipetoseek.SettingsActivity.*;
 
+import de.robv.android.xposed.IXposedHookInitPackageResources;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XSharedPreferences;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
+import de.robv.android.xposed.callbacks.XC_InitPackageResources;
+import de.robv.android.xposed.callbacks.XC_LayoutInflated;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import static de.robv.android.xposed.XposedHelpers.*;
 
 /**
  * Created by hieptran on 24/05/2016.
  */
 
-public class YoutubeHooker implements IXposedHookLoadPackage {
+public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPackageResources {
     private static final String[] SUPPORT_YOUTUBE_PACKAGE = new String[] {
-            "com.google.android.youtube",
+            "com.google.android.youtube"
 //            "com.google.android.apps.youtube.gaming",
-            "com.google.android.ogyoutube"
+//            "com.google.android.ogyoutube"
     };
     private static final String[] CLASS_APPLICATION = new String[]{
             "com.google.android.apps.youtube.app.YouTubeApplication",
@@ -79,20 +89,38 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
         }
     }
 
+    @Override
+    public void handleInitPackageResources(XC_InitPackageResources.InitPackageResourcesParam initPackageResourcesParam) throws Throwable {
+        int pgIndex = findPackageIndex(initPackageResourcesParam.packageName);
+        if (pgIndex != -1) {
+            hookYoutubeSwipeToSeek(initPackageResourcesParam, pgIndex);
+        }
+    }
+
     private static void hookYoutubeSwipeToSeek(XC_LoadPackage.LoadPackageParam loadPackageParam, int pgIndex) {
         // Holds objects share through classes
-        final HookDataHolder hookDataHolder = new HookDataHolder();
-        mHookDataHolder[pgIndex] = hookDataHolder;
+        final HookDataHolder hookDataHolder;
+        if (mHookDataHolder[pgIndex] == null) {
+            hookDataHolder = new HookDataHolder();
+            mHookDataHolder[pgIndex] = hookDataHolder;
+        } else {
+            hookDataHolder = mHookDataHolder[pgIndex];
+        }
 
         // Preferences
         initPrefs(pgIndex);
 
-        // Hook YouTubeApplication to register settings broadcast listener, create SwipeDetector
-        XposedHelpers.findAndHookMethod(CLASS_APPLICATION[pgIndex], loadPackageParam.classLoader,
+        // Find PlayerViewMode obfuscated class name
+        Class ytPlayerViewCls = findClass(CLASS_PLAYER_VIEW[pgIndex], loadPackageParam.classLoader);
+        Class viewModeCls = findClass(findPlayerViewModeObfuscatedClassName(ytPlayerViewCls), loadPackageParam.classLoader);
+        final Field viewModeField = findFirstFieldByExactType(ytPlayerViewCls, viewModeCls);
+
+        // Hook YouTubeApplication to register settings broadcast listener and to create SwipeDetector
+        findAndHookMethod(CLASS_APPLICATION[pgIndex], loadPackageParam.classLoader,
                 "onCreate", new XC_MethodHook() {
                     @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Context c = (Context) XposedHelpers.callMethod(param.thisObject, "getApplicationContext");
+                    protected void afterHookedMethod(final MethodHookParam param) throws Throwable {
+                        Context c = (Context) callMethod(param.thisObject, "getApplicationContext");
                         c.registerReceiver(new BroadcastReceiver() {
                             @Override
                             public void onReceive(Context context, Intent intent) {
@@ -200,6 +228,18 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                             @Override
                             public boolean onTouchedDown(int x, int y) {
                                 if (DEBUG) XposedBridge.log(TAG + ": " + Arrays.toString(Thread.currentThread().getStackTrace()));
+
+                                // Check if we are playing 360 video
+                                // Actually we check if vrButton is visible or not
+                                // There are too many ways but this way doesn't touch any obfuscated codes
+                                // I'm not sure this method has correct result for all devices
+                                if (hookDataHolder.vrButton != null
+                                        && hookDataHolder.vrButton.getVisibility() == View.VISIBLE)
+                                {
+                                    if (DEBUG) XposedBridge.log(TAG + ": vr button visible, maybe this is 360 video");
+                                    return false;
+                                }
+
                                 // Get screen size to know if player is in fullscreen mode
                                 DisplayMetrics displayMetrics = hookDataHolder.youtubePlayerView.getResources().getDisplayMetrics();
                                 int scrHeight = displayMetrics.heightPixels;
@@ -217,7 +257,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                             @Override
                             public void onSwipeStop() {
                                 // Seek immediately
-                                if (swipeDirection != null && swipeDirection == SwipeDetector.Direction.HORIZONTAL) {
+                                if (swipeDirection != null && swipeDirection == SwipeDetector.Direction.HORIZONTAL && hookDataHolder.isSeekingEnabled) {
                                     Message seekMsg = hookDataHolder.handler.obtainMessage(MSG_SEEK, newPos);
                                     hookDataHolder.handler.sendMessage(seekMsg);
                                 }
@@ -263,7 +303,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                 });
 
         // Get MediaController
-        XposedHelpers.findAndHookConstructor(CLASS_MEDIA_CONTROLLER[pgIndex], loadPackageParam.classLoader,
+        findAndHookConstructor(CLASS_MEDIA_CONTROLLER[pgIndex], loadPackageParam.classLoader,
                 Context.class, "android.media.session.MediaSession$Token", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -274,7 +314,6 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                 });
 
 
-        Class ytPlayerViewCls = XposedHelpers.findClass(CLASS_PLAYER_VIEW[pgIndex], loadPackageParam.classLoader);
         XposedBridge.hookAllConstructors(ytPlayerViewCls, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -294,7 +333,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
             }
         });
         // Receive touch events
-        XposedHelpers.findAndHookMethod(ytPlayerViewCls,
+        findAndHookMethod(ytPlayerViewCls,
                 "dispatchTouchEvent", MotionEvent.class, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -304,6 +343,56 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
                         hookDataHolder.youtubeVideoSwipeDetector.onEvent(motionEvent);
                     }
                 });
+    }
+
+    private static void hookYoutubeSwipeToSeek(XC_InitPackageResources.InitPackageResourcesParam resParam, int pgIndex) {
+        // Holds objects share through classes
+        final HookDataHolder hookDataHolder;
+        if (mHookDataHolder[pgIndex] == null) {
+            hookDataHolder = new HookDataHolder();
+            mHookDataHolder[pgIndex] = hookDataHolder;
+        } else {
+            hookDataHolder = mHookDataHolder[pgIndex];
+        }
+
+        try {
+            XResources res = resParam.res;
+            res.hookLayout(SUPPORT_YOUTUBE_PACKAGE[pgIndex], "layout", "vr_button", new XC_LayoutInflated() {
+                @Override
+                public void handleLayoutInflated(LayoutInflatedParam layoutInflatedParam) throws Throwable {
+                    View v = layoutInflatedParam.view;
+                    if (v.getClass().getName().equals("com.google.android.libraries.youtube.common.ui.TouchImageView")) {
+                        hookDataHolder.vrButton = v;
+                        XposedBridge.log(TAG + ": vr button found: vr_button");
+                    } else {
+                        XposedBridge.log(TAG + ": vr button not found");
+                    }
+                }
+            });
+        } catch (Exception e) {
+            if (DEBUG) e.printStackTrace();
+
+            // In old versions, they named modoro_button instead of vr_button
+            if (DEBUG) XposedBridge.log(TAG + ": vr_button does not exist, continue to found modoro_button");
+            try {
+                XResources res = resParam.res;
+                res.hookLayout(SUPPORT_YOUTUBE_PACKAGE[pgIndex], "layout", "modoro_button", new XC_LayoutInflated() {
+                    @Override
+                    public void handleLayoutInflated(LayoutInflatedParam layoutInflatedParam) throws Throwable {
+                        View v = layoutInflatedParam.view;
+                        if (v.getClass().getName().equals("com.google.android.libraries.youtube.common.ui.TouchImageView")) {
+                            hookDataHolder.vrButton = v;
+                            XposedBridge.log(TAG + ": vr button found: modoro_button");
+                        } else {
+                            XposedBridge.log(TAG + ": vr button not found");
+                        }
+                    }
+                });
+            } catch (Exception e2) {
+                e2.printStackTrace();
+            }
+        }
+
     }
 
     private static void initPrefs(int pgIndex) {
@@ -319,7 +408,32 @@ public class YoutubeHooker implements IXposedHookLoadPackage {
         long seconds = millis / 1000;
         long s = seconds % 60;
         long m = (seconds / 60) % 60;
-        long h = (seconds / (60 * 60)) % 24;
+        long h = seconds / (60 * 60);
         return String.format("%02d:%02d:%02d", h, m, s);
+    }
+
+    private static String findPlayerViewModeObfuscatedClassName(Class playerViewClass) {
+        // In class YouTubePlayerView there is 2 method which has only one parameter with the same type
+        // These parameter are PlayerViewMode
+        Method[] allMethods = playerViewClass.getDeclaredMethods();
+
+        String name = null;
+        for (int i = 0; i < allMethods.length - 1; i++) {
+            if (name != null) break;
+            Method m = allMethods[i];
+            if (m.getParameterTypes().length != 1 || m.getName().toLowerCase().contains("touch")) continue;
+
+            for (int j = i + 1; j < allMethods.length; j++) {
+                Method m2 = allMethods[j];
+                if (m2.getParameterTypes().length != 1 || m2.getName().toLowerCase().contains("touch")) continue;
+
+                if (m2.getParameterTypes()[0].toString().equals(m.getParameterTypes()[0].toString())) {
+                    name = m2.getParameterTypes()[0].getName();
+                    if (DEBUG) XposedBridge.log(TAG + ": found PlayerViewModeObfuscatedClassName: " + name);
+                    break;
+                }
+            }
+        }
+        return name;
     }
 }

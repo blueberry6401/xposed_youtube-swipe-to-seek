@@ -22,4 +22,5 @@ public class HookDataHolder {
     // Settings boolean
     boolean isSeekingEnabled, isChangingVolumeEnabled;
     Handler handler;
+    View vrButton;
 }
