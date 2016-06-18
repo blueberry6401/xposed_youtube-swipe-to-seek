@@ -112,7 +112,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 
         // Find PlayerViewMode obfuscated class name
         Class ytPlayerViewCls = findClass(CLASS_PLAYER_VIEW[pgIndex], loadPackageParam.classLoader);
-        Class viewModeCls = findClass(findPlayerViewModeObfuscatedClassName(ytPlayerViewCls), loadPackageParam.classLoader);
+        final Class viewModeCls = findClass(findPlayerViewModeObfuscatedClassName(ytPlayerViewCls), loadPackageParam.classLoader);
         final Field viewModeField = findFirstFieldByExactType(ytPlayerViewCls, viewModeCls);
 
         // Hook YouTubeApplication to register settings broadcast listener and to create SwipeDetector
@@ -240,11 +240,23 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                                     return false;
                                 }
 
-                                // Get screen size to know if player is in fullscreen mode
-                                DisplayMetrics displayMetrics = hookDataHolder.youtubePlayerView.getResources().getDisplayMetrics();
-                                int scrHeight = displayMetrics.heightPixels;
-                                hookDataHolder.isFullscreen = hookDataHolder.youtubePlayerView.getHeight() == scrHeight;
-                                if (DEBUG) XposedBridge.log(TAG + ": scrHeight=" + scrHeight + ", player view height=" + hookDataHolder.youtubePlayerView.getHeight());
+
+                                // Check if player is fullscreen. In fullscreen mode, vertical swiping is disabled
+                                try {
+                                    // Use PlayerViewMode to detect if player is fullscreen
+                                    Object viewModeData = viewModeField.get(hookDataHolder.youtubePlayerView);
+                                    hookDataHolder.isFullscreen = viewModeData.toString().equals("WATCH_WHILE_FULLSCREEN");
+                                    if (DEBUG) XposedBridge.log(TAG + ": viewMode field data: " + viewModeData.toString());
+                                } catch (Exception e) {
+                                    if (DEBUG) XposedBridge.log(TAG + ": cannot use PlayerViewMode, detect fullscreen by get PlayerView size");
+                                    // Get screen size to know if player is in fullscreen mode
+                                    DisplayMetrics displayMetrics = hookDataHolder.youtubePlayerView.getResources().getDisplayMetrics();
+                                    int scrHeight = displayMetrics.heightPixels;
+                                    hookDataHolder.isFullscreen = hookDataHolder.youtubePlayerView.getHeight() == scrHeight;
+                                    if (DEBUG) XposedBridge.log(TAG + ": scrHeight=" + scrHeight + ", player view height=" + hookDataHolder.youtubePlayerView.getHeight());
+                                }
+
+
 
                                 // Bypass if user swipes from edge
                                 if (DEBUG) XposedBridge.log(TAG + ": touched down, x=" + x + ", y=" + y);
