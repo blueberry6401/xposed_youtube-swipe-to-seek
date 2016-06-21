@@ -13,6 +13,7 @@ import android.media.session.MediaController;
 import android.media.session.PlaybackState;
 import android.os.Handler;
 import android.os.Message;
+import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.Pair;
 import android.util.TypedValue;
@@ -112,10 +113,20 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 
         // Find PlayerViewMode obfuscated class name
         Class ytPlayerViewCls = findClass(CLASS_PLAYER_VIEW[pgIndex], loadPackageParam.classLoader);
-        final Class viewModeCls = findClass(findPlayerViewModeObfuscatedClassName(ytPlayerViewCls), loadPackageParam.classLoader);
-        final Field viewModeField = findFirstFieldByExactType(ytPlayerViewCls, viewModeCls);
+        String viewModeClassName = findPlayerViewModeObfuscatedClassName(ytPlayerViewCls);
+        Field viewModeField = null;
+        if (viewModeClassName != null && !TextUtils.isEmpty(viewModeClassName)) {
+            try {
+                final Class viewModeCls = findClass(viewModeClassName, loadPackageParam.classLoader);
+                viewModeField = findFirstFieldByExactType(ytPlayerViewCls, viewModeCls);
+            } catch (Exception e) {
+                XposedBridge.log(TAG + ": " + e.getMessage());
+            }
+        }
+
 
         // Hook YouTubeApplication to register settings broadcast listener and to create SwipeDetector
+        final Field finalViewModeField = viewModeField;
         findAndHookMethod(CLASS_APPLICATION[pgIndex], loadPackageParam.classLoader,
                 "onCreate", new XC_MethodHook() {
                     @Override
@@ -244,7 +255,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                                 // Check if player is fullscreen. In fullscreen mode, vertical swiping is disabled
                                 try {
                                     // Use PlayerViewMode to detect if player is fullscreen
-                                    Object viewModeData = viewModeField.get(hookDataHolder.youtubePlayerView);
+                                    Object viewModeData = finalViewModeField.get(hookDataHolder.youtubePlayerView);
                                     hookDataHolder.isFullscreen = viewModeData.toString().equals("WATCH_WHILE_FULLSCREEN");
                                     if (DEBUG) XposedBridge.log(TAG + ": viewMode field data: " + viewModeData.toString());
                                 } catch (Exception e) {
@@ -301,6 +312,8 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                                         currentPos = -1;
                                         if (DEBUG) {
                                             XposedBridge.log(TAG + ": swipe started");
+                                            XposedBridge.log(String.format("%s: current pos=%d, video duration=%d",
+                                                                            TAG, onStartPosition, currentVideoDuration));
                                             XposedBridge.log(String.format("%s: fullScr=%s, maxMusicVol=%d, currentMusicVol=%d",
                                                                             TAG, hookDataHolder.isFullscreen, maxMusicVolume, currentMusicVolume));
                                         }
@@ -382,7 +395,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                 }
             });
         } catch (Exception e) {
-            if (DEBUG) e.printStackTrace();
+            if (DEBUG) XposedBridge.log(TAG + ": " + e.getMessage());
 
             // In old versions, they named modoro_button instead of vr_button
             if (DEBUG) XposedBridge.log(TAG + ": vr_button does not exist, continue to found modoro_button");
@@ -401,7 +414,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                     }
                 });
             } catch (Exception e2) {
-                e2.printStackTrace();
+                if (DEBUG) XposedBridge.log(TAG + ": " + e2.getMessage());
             }
         }
 
