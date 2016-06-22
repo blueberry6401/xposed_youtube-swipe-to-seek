@@ -445,7 +445,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 
     private static String findPlayerViewModeObfuscatedClassName(Class playerViewClass) {
         // In class YouTubePlayerView there is 2 method which has only one parameter with the same type
-        // These parameter are PlayerViewMode
+        // These parameters are PlayerViewMode
         Method[] allMethods = playerViewClass.getDeclaredMethods();
 
         String name = null;
