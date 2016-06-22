@@ -37,6 +37,8 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_InitPackageResources;
 import de.robv.android.xposed.callbacks.XC_LayoutInflated;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
+
+import static de.robv.android.xposed.XposedBridge.*;
 import static de.robv.android.xposed.XposedHelpers.*;
 
 /**
@@ -120,7 +122,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                 final Class viewModeCls = findClass(viewModeClassName, loadPackageParam.classLoader);
                 viewModeField = findFirstFieldByExactType(ytPlayerViewCls, viewModeCls);
             } catch (Exception e) {
-                XposedBridge.log(TAG + ": " + e.getMessage());
+                log(TAG + ": " + e.getMessage());
             }
         }
 
@@ -137,14 +139,14 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                             public void onReceive(Context context, Intent intent) {
                                 String action = intent.getAction();
                                 if (action.equals(SettingsActivity.ACTION_SETTINGS_CHANGED)) {
-                                    if (DEBUG) XposedBridge.log(TAG + ": reload settings");
+                                    if (DEBUG) log(TAG + ": reload settings");
 
                                     if (intent.hasExtra(PREF_SWIPE_TO_SEEK)) {
                                         hookDataHolder.isSeekingEnabled = intent.getBooleanExtra(PREF_SWIPE_TO_SEEK, false);
                                     } else if (intent.hasExtra(PREF_SWIPE_TO_CHANGE_VOLUME)) {
                                         hookDataHolder.isChangingVolumeEnabled = intent.getBooleanExtra(PREF_SWIPE_TO_CHANGE_VOLUME, false);
                                     }
-                                    if (DEBUG) XposedBridge.log(String.format("%s: allow seek %s, allow change vol %s", TAG, String.valueOf(hookDataHolder.isSeekingEnabled), String.valueOf(hookDataHolder.isChangingVolumeEnabled)));
+                                    if (DEBUG) log(String.format("%s: allow seek %s, allow change vol %s", TAG, String.valueOf(hookDataHolder.isSeekingEnabled), String.valueOf(hookDataHolder.isChangingVolumeEnabled)));
                                 }
                             }
                         }, new IntentFilter(SettingsActivity.ACTION_SETTINGS_CHANGED));
@@ -188,7 +190,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 
                                 int secsToSeek = (int) (mm / 1.5);
                                 if (DEBUG) {
-                                    XposedBridge.log(TAG + ": swipe " + mm + ", seek " + secsToSeek);
+                                    log(TAG + ": swipe " + mm + ", seek " + secsToSeek);
                                 }
 
                                 newPos =  onStartPosition + secsToSeek * 1000;
@@ -225,7 +227,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 
                                 int volumeDelta = -mm / 3; // Invert: up to increase volume, and otherwise
                                 if (DEBUG)
-                                    XposedBridge.log(TAG + ": swipe " + mm + ", volume " + volumeDelta);
+                                    log(TAG + ": swipe " + mm + ", volume " + volumeDelta);
                                 int newVolume = currentMusicVolume + volumeDelta;
                                 newVolume = Math.max(0, newVolume);
                                 newVolume = Math.min(newVolume, maxMusicVolume);
@@ -238,8 +240,6 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 
                             @Override
                             public boolean onTouchedDown(int x, int y) {
-                                if (DEBUG) XposedBridge.log(TAG + ": " + Arrays.toString(Thread.currentThread().getStackTrace()));
-
                                 // Check if we are playing 360 video
                                 // Actually we check if vrButton is visible or not
                                 // There are too many ways but this way doesn't touch any obfuscated codes
@@ -247,7 +247,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                                 if (hookDataHolder.vrButton != null
                                         && hookDataHolder.vrButton.getVisibility() == View.VISIBLE)
                                 {
-                                    if (DEBUG) XposedBridge.log(TAG + ": vr button visible, maybe this is 360 video");
+                                    if (DEBUG) log(TAG + ": vr button visible, maybe this is 360 video");
                                     return false;
                                 }
 
@@ -257,20 +257,20 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                                     // Use PlayerViewMode to detect if player is fullscreen
                                     Object viewModeData = finalViewModeField.get(hookDataHolder.youtubePlayerView);
                                     hookDataHolder.isFullscreen = viewModeData.toString().equals("WATCH_WHILE_FULLSCREEN");
-                                    if (DEBUG) XposedBridge.log(TAG + ": viewMode field data: " + viewModeData.toString());
+                                    if (DEBUG) log(TAG + ": viewMode field data: " + viewModeData.toString());
                                 } catch (Exception e) {
-                                    if (DEBUG) XposedBridge.log(TAG + ": cannot use PlayerViewMode, detect fullscreen by get PlayerView size");
+                                    if (DEBUG) log(TAG + ": cannot use PlayerViewMode, detect fullscreen by get PlayerView size");
                                     // Get screen size to know if player is in fullscreen mode
                                     DisplayMetrics displayMetrics = hookDataHolder.youtubePlayerView.getResources().getDisplayMetrics();
                                     int scrHeight = displayMetrics.heightPixels;
                                     hookDataHolder.isFullscreen = hookDataHolder.youtubePlayerView.getHeight() == scrHeight;
-                                    if (DEBUG) XposedBridge.log(TAG + ": scrHeight=" + scrHeight + ", player view height=" + hookDataHolder.youtubePlayerView.getHeight());
+                                    if (DEBUG) log(TAG + ": scrHeight=" + scrHeight + ", player view height=" + hookDataHolder.youtubePlayerView.getHeight());
                                 }
 
 
 
                                 // Bypass if user swipes from edge
-                                if (DEBUG) XposedBridge.log(TAG + ": touched down, x=" + x + ", y=" + y);
+                                if (DEBUG) log(TAG + ": touched down, x=" + x + ", y=" + y);
                                 return !(hookDataHolder.isFullscreen &&
                                         (x < EDGE_SIZE
                                                 || x > hookDataHolder.youtubePlayerView.getWidth() - EDGE_SIZE
@@ -287,7 +287,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 
                                 hookDataHolder.infoToast.cancel();
                                 currentPos = -1;
-                                if (DEBUG) XposedBridge.log(TAG + "swipe stopped");
+                                if (DEBUG) log(TAG + "swipe stopped");
                             }
 
                             @Override
@@ -311,10 +311,10 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                                         currentMusicVolume = hookDataHolder.audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
                                         currentPos = -1;
                                         if (DEBUG) {
-                                            XposedBridge.log(TAG + ": swipe started");
-                                            XposedBridge.log(String.format("%s: current pos=%d, video duration=%d",
+                                            log(TAG + ": swipe started");
+                                            log(String.format("%s: current pos=%d, video duration=%d",
                                                                             TAG, onStartPosition, currentVideoDuration));
-                                            XposedBridge.log(String.format("%s: fullScr=%s, maxMusicVol=%d, currentMusicVol=%d",
+                                            log(String.format("%s: fullScr=%s, maxMusicVol=%d, currentMusicVol=%d",
                                                                             TAG, hookDataHolder.isFullscreen, maxMusicVolume, currentMusicVolume));
                                         }
                                         return true;
@@ -334,12 +334,12 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         hookDataHolder.youtubeMediaController = (MediaController) param.thisObject;
 
-                        if (DEBUG) XposedBridge.log(TAG + ": got youtube media controller, null: " + String.valueOf(hookDataHolder.youtubeMediaController == null));
+                        if (DEBUG) log(TAG + ": got youtube media controller, null: " + String.valueOf(hookDataHolder.youtubeMediaController == null));
                     }
                 });
 
 
-        XposedBridge.hookAllConstructors(ytPlayerViewCls, new XC_MethodHook() {
+        hookAllConstructors(ytPlayerViewCls, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                 hookDataHolder.youtubePlayerView = (View) param.thisObject;
@@ -388,17 +388,23 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                     View v = layoutInflatedParam.view;
                     if (v.getClass().getName().equals("com.google.android.libraries.youtube.common.ui.TouchImageView")) {
                         hookDataHolder.vrButton = v;
-                        XposedBridge.log(TAG + ": vr button found: vr_button");
+                        log(TAG + ": vr button found: vr_button");
                     } else {
-                        XposedBridge.log(TAG + ": vr button not found");
+                        log(TAG + ": vr button not found");
                     }
                 }
             });
+//            res.hookLayout(SUPPORT_YOUTUBE_PACKAGE[pgIndex], "layout", "inline_controls_overlay", new XC_LayoutInflated() {
+//                @Override
+//                public void handleLayoutInflated(LayoutInflatedParam layoutInflatedParam) throws Throwable {
+//                    log(TAG + ": " + Arrays.toString(Thread.currentThread().getStackTrace()));
+//                }
+//            });
         } catch (Exception e) {
-            if (DEBUG) XposedBridge.log(TAG + ": " + e.getMessage());
+            if (DEBUG) log(TAG + ": " + e.getMessage());
 
             // In old versions, they named modoro_button instead of vr_button
-            if (DEBUG) XposedBridge.log(TAG + ": vr_button does not exist, continue to found modoro_button");
+            if (DEBUG) log(TAG + ": vr_button does not exist, continue to found modoro_button");
             try {
                 XResources res = resParam.res;
                 res.hookLayout(SUPPORT_YOUTUBE_PACKAGE[pgIndex], "layout", "modoro_button", new XC_LayoutInflated() {
@@ -407,14 +413,14 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                         View v = layoutInflatedParam.view;
                         if (v.getClass().getName().equals("com.google.android.libraries.youtube.common.ui.TouchImageView")) {
                             hookDataHolder.vrButton = v;
-                            XposedBridge.log(TAG + ": vr button found: modoro_button");
+                            log(TAG + ": vr button found: modoro_button");
                         } else {
-                            XposedBridge.log(TAG + ": vr button not found");
+                            log(TAG + ": vr button not found");
                         }
                     }
                 });
             } catch (Exception e2) {
-                if (DEBUG) XposedBridge.log(TAG + ": " + e2.getMessage());
+                if (DEBUG) log(TAG + ": " + e2.getMessage());
             }
         }
 
@@ -454,7 +460,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 
                 if (m2.getParameterTypes()[0].toString().equals(m.getParameterTypes()[0].toString())) {
                     name = m2.getParameterTypes()[0].getName();
-                    if (DEBUG) XposedBridge.log(TAG + ": found PlayerViewModeObfuscatedClassName: " + name);
+                    if (DEBUG) log(TAG + ": found PlayerViewModeObfuscatedClassName: " + name);
                     break;
                 }
             }
