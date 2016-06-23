@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.content.res.XResources;
 import android.media.AudioManager;
@@ -15,7 +14,6 @@ import android.os.Handler;
 import android.os.Message;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
-import android.util.Pair;
 import android.util.TypedValue;
 import android.view.MotionEvent;
 import android.view.View;
@@ -23,7 +21,6 @@ import android.widget.Toast;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
 import java.util.Arrays;
 
 import static com.blueberry.youtubeswipetoseek.SettingsActivity.*;
@@ -32,8 +29,6 @@ import de.robv.android.xposed.IXposedHookInitPackageResources;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XSharedPreferences;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_InitPackageResources;
 import de.robv.android.xposed.callbacks.XC_LayoutInflated;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
@@ -110,12 +105,16 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
             hookDataHolder = mHookDataHolder[pgIndex];
         }
 
+        hookDataHolder.loadPackageParam = loadPackageParam;
+        // hookDataHolder.xResources != null means setTimes method hasn't been hooked
+        if (hookDataHolder.xResources != null) hookSetTimesMethod(hookDataHolder.xResources, pgIndex, hookDataHolder);
+
         // Preferences
         initPrefs(pgIndex);
 
         // Find PlayerViewMode obfuscated class name
         Class ytPlayerViewCls = findClass(CLASS_PLAYER_VIEW[pgIndex], loadPackageParam.classLoader);
-        String viewModeClassName = findPlayerViewModeObfuscatedClassName(ytPlayerViewCls);
+        String viewModeClassName = findPlayerViewModeClassName(ytPlayerViewCls);
         Field viewModeField = null;
         if (viewModeClassName != null && !TextUtils.isEmpty(viewModeClassName)) {
             try {
@@ -302,7 +301,13 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                                     currentVideoPlaybackState = hookDataHolder.youtubeMediaController.getPlaybackState();
                                     if (currentVideoDuration > 0 && currentVideoPlaybackState != null) {
                                         currentVideoDurationString = millisToTimeString(currentVideoDuration);
+                                        // By default we use getPosition() to get more accurate value
                                         onStartPosition = currentVideoPlaybackState.getPosition();
+                                        if (hookDataHolder.settimeCurrentPosition >= 0
+                                                &&Math.abs(onStartPosition - hookDataHolder.settimeCurrentPosition) > 2000) {
+                                            onStartPosition = hookDataHolder.settimeCurrentPosition;
+                                            if (DEBUG) log(TAG + ": getPosition not equal setTimesPosition");
+                                        }
 
                                         // Init vars
                                         swipeDirection = null;
@@ -394,12 +399,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                     }
                 }
             });
-//            res.hookLayout(SUPPORT_YOUTUBE_PACKAGE[pgIndex], "layout", "inline_controls_overlay", new XC_LayoutInflated() {
-//                @Override
-//                public void handleLayoutInflated(LayoutInflatedParam layoutInflatedParam) throws Throwable {
-//                    log(TAG + ": " + Arrays.toString(Thread.currentThread().getStackTrace()));
-//                }
-//            });
+
         } catch (Exception e) {
             if (DEBUG) log(TAG + ": " + e.getMessage());
 
@@ -424,6 +424,14 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
             }
         }
 
+
+        //
+        if (hookDataHolder.loadPackageParam != null) {
+            hookSetTimesMethod(resParam.res, pgIndex, hookDataHolder);
+        } else {
+            // Assign xResources to request hooking after we have loadPackageParam
+            hookDataHolder.xResources = resParam.res;
+        }
     }
 
     private static void initPrefs(int pgIndex) {
@@ -443,7 +451,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
         return String.format("%02d:%02d:%02d", h, m, s);
     }
 
-    private static String findPlayerViewModeObfuscatedClassName(Class playerViewClass) {
+    private static String findPlayerViewModeClassName(Class playerViewClass) {
         // In class YouTubePlayerView there is 2 method which has only one parameter with the same type
         // These parameters are PlayerViewMode
         Method[] allMethods = playerViewClass.getDeclaredMethods();
@@ -466,5 +474,124 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
             }
         }
         return name;
+    }
+
+    /**
+     * By default we use playbackState.getPosition(), but there is sometimes it returns wrong value
+     * (especially if you have Youtube background playback module installed)
+     * I don't have time to dig any further, so this is a little workaround solution
+     */
+    private static void hookSetTimesMethod(XResources res, int pgIndex, final HookDataHolder dataHolder) {
+        dataHolder.settimeCurrentPosition = -1;
+        if (dataHolder.loadPackageParam == null) return;
+
+        // Hook method setTimes() in InlineControlsOverlay
+        try {
+            res.hookLayout(SUPPORT_YOUTUBE_PACKAGE[pgIndex], "layout", "inline_controls_overlay", new XC_LayoutInflated() {
+                @Override
+                public void handleLayoutInflated(LayoutInflatedParam layoutInflatedParam) throws Throwable {
+                    StackTraceElement[] traces = Thread.currentThread().getStackTrace();
+                    if (DEBUG) log(TAG + ": " + Arrays.toString(traces));
+                    String obfuscatedClsName = "";
+
+                    obfuscatedClsName = findControlOverlayClassName(traces);
+                    if (!TextUtils.isEmpty(obfuscatedClsName)) {
+                        findAndHookSetTimesMethod(dataHolder, obfuscatedClsName);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            if (DEBUG) log(e.getMessage());
+        }
+
+        // Hook method setTimes() in DefaultControlsOverlay
+        try {
+            res.hookLayout(SUPPORT_YOUTUBE_PACKAGE[pgIndex], "layout", "default_controls_overlay", new XC_LayoutInflated() {
+                @Override
+                public void handleLayoutInflated(LayoutInflatedParam layoutInflatedParam) throws Throwable {
+                    StackTraceElement[] traces = Thread.currentThread().getStackTrace();
+                    if (DEBUG) log(TAG + ": " + Arrays.toString(traces));
+                    String obfuscatedClsName = "";
+
+                    obfuscatedClsName = findControlOverlayClassName(traces);
+                    if (!TextUtils.isEmpty(obfuscatedClsName)) {
+                        findAndHookSetTimesMethod(dataHolder, obfuscatedClsName);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            if (DEBUG) log(e.getMessage());
+        }
+
+        // Hook method setTimes() in YouTubeControlsOverlay
+        try {
+            res.hookLayout(SUPPORT_YOUTUBE_PACKAGE[pgIndex], "layout", "youtube_controls_overlay", new XC_LayoutInflated() {
+                @Override
+                public void handleLayoutInflated(LayoutInflatedParam layoutInflatedParam) throws Throwable {
+                    StackTraceElement[] traces = Thread.currentThread().getStackTrace();
+                    if (DEBUG) log(TAG + ": " + Arrays.toString(traces));
+                    String obfuscatedClsName = "";
+
+                    obfuscatedClsName = findControlOverlayClassName(traces);
+                    if (!TextUtils.isEmpty(obfuscatedClsName)) {
+                        findAndHookSetTimesMethod(dataHolder, obfuscatedClsName);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            if (DEBUG) log(e.getMessage());
+        }
+    }
+
+    /**
+     * Find class call inflate() in constructor
+     */
+    private static String findControlOverlayClassName(StackTraceElement[] traces) {
+        String obfuscatedClsName = "";
+
+        for (int k = 0; k < traces.length; k++) {
+            StackTraceElement trace = traces[k];
+
+            String s = trace.toString();
+            if (!s.contains("blueberry") && !s.contains("de.robv")) {
+                int i = s.indexOf(".<init>");
+                if (i < 0) continue;
+                if (k > 0 && traces[k - 1].toString().contains(".inflate")) {
+                    obfuscatedClsName = s.substring(0, i);
+                }
+
+                // If we reach a constructor but it doesn't invoke inflate(), jump out
+                break;
+            }
+        }
+        if (DEBUG && !TextUtils.isEmpty(obfuscatedClsName)) log(TAG + ": found control overlay class name: " + obfuscatedClsName);
+        return obfuscatedClsName;
+    }
+
+    private static void findAndHookSetTimesMethod(final HookDataHolder dataHolder, String obfuscatedClsName) {
+        Class cls = findClass(obfuscatedClsName, dataHolder.loadPackageParam.classLoader);
+        // Find setTimes method, this method has 4 long parameters, pretty unique
+        Method[] allMethods = cls.getDeclaredMethods();
+        Method method = null;
+        for (Method m : allMethods) {
+            Class[] paramsCls = m.getParameterTypes();
+            if (paramsCls.length == 4
+                    && paramsCls[0].equals(long.class) && paramsCls[1].equals(long.class)
+                    && paramsCls[2].equals(long.class) && paramsCls[3].equals(long.class)) {
+                method = m;
+                break;
+            }
+        }
+
+        if (method != null) {
+            if (DEBUG) log(TAG + ": found setTimes method: " + method.toString());
+
+            findAndHookMethod(cls, method.getName(), long.class, long.class, long.class, long.class, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    dataHolder.settimeCurrentPosition = (long) param.args[0];
+                }
+            });
+        }
     }
 }
