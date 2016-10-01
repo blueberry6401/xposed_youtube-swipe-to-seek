@@ -23,6 +23,7 @@ public class HookDataHolder {
     View youtubePlayerView;
     // Settings boolean
     boolean isSeekingEnabled, isChangingVolumeEnabled;
+    int seekBarHeight;
 
     Handler handler;
     View vrButton;

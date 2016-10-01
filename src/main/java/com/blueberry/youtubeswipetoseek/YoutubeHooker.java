@@ -21,6 +21,7 @@ import android.widget.Toast;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Type;
 import java.util.Arrays;
 
 import static com.blueberry.youtubeswipetoseek.SettingsActivity.*;
@@ -61,6 +62,11 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 //            "com.google.android.apps.youtube.gaming.player.GamingPlayerView",
             "com.google.android.apps.ogyoutube.app.player.YouTubePlayerView"
     };
+    private static final String[] CLASS_WATCH_WHILE_LAYOUT = new String[]{
+            "com.google.android.apps.youtube.app.ui.WatchWhileLayout",
+//            "com.google.android.apps.youtube.gaming.player.GamingPlayerView",
+            null
+    };
     private static HookDataHolder[] mHookDataHolder = new HookDataHolder[SUPPORT_YOUTUBE_PACKAGE.length];
 
     private static final boolean DEBUG = BuildConfig.DEBUG;
@@ -95,7 +101,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
         }
     }
 
-    private static void hookYoutubeSwipeToSeek(XC_LoadPackage.LoadPackageParam loadPackageParam, int pgIndex) {
+    private static void hookYoutubeSwipeToSeek(XC_LoadPackage.LoadPackageParam loadPackageParam, final int pgIndex) {
         // Holds objects share through classes
         final HookDataHolder hookDataHolder;
         if (mHookDataHolder[pgIndex] == null) {
@@ -154,7 +160,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                         if (mModuleResources == null) {
                             mModuleResources = Utils.getModuleContext(c).getResources();
                             EDGE_SIZE = (int) TypedValue.applyDimension(
-                                    TypedValue.COMPLEX_UNIT_DIP, 22f, c.getResources().getDisplayMetrics());
+                                    TypedValue.COMPLEX_UNIT_DIP, 30f, c.getResources().getDisplayMetrics());
                         }
 
                         //
@@ -184,7 +190,9 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                                 if (!hookDataHolder.isSeekingEnabled) return;
                                 // isTouchEventDispatched will be true if youtube's view has handled
                                 // the touch event
-                                if (hookDataHolder.isTouchEventDispatched) return;
+                                // this condition helps us to detect if users are swiping seek bar
+                                // UPDATE: no longer works, detect if user swipes from edge instead
+//                                if (hookDataHolder.isTouchEventDispatched) return;
                                 if (swipeDirection == SwipeDetector.Direction.VERTICAL) return;
 
                                 int secsToSeek = (int) (mm / 1.5);
@@ -270,10 +278,12 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 
                                 // Bypass if user swipes from edge
                                 if (DEBUG) log(TAG + ": touched down, x=" + x + ", y=" + y);
-                                return !(hookDataHolder.isFullscreen &&
-                                        (x < EDGE_SIZE
-                                                || x > hookDataHolder.youtubePlayerView.getWidth() - EDGE_SIZE
-                                                || y < EDGE_SIZE));
+                                return !(
+                                        x < EDGE_SIZE
+                                        || x > hookDataHolder.youtubePlayerView.getWidth() - EDGE_SIZE
+                                        || y < EDGE_SIZE
+                                        || y > hookDataHolder.youtubePlayerView.getHeight() - hookDataHolder.seekBarHeight
+                                );
                             }
 
                             @Override
@@ -363,16 +373,34 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
             }
         });
         // Receive touch events
-        findAndHookMethod(ytPlayerViewCls,
+        findAndHookMethod("android.view.ViewGroup", loadPackageParam.classLoader,
                 "dispatchTouchEvent", MotionEvent.class, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (!param.thisObject.getClass().getName().equals(CLASS_WATCH_WHILE_LAYOUT[pgIndex])) {
+                            if (DEBUG) log(TAG + ": not WatchWhileLayout, " + param.thisObject.getClass().getSimpleName());
+                            return;
+                        }
+
                         hookDataHolder.isTouchEventDispatched = (boolean) param.getResult();
                         MotionEvent motionEvent = (MotionEvent) param.args[0];
 
                         hookDataHolder.youtubeVideoSwipeDetector.onEvent(motionEvent);
                     }
                 });
+        // Hook to get some needed values
+        hookAllConstructors(findClass(CLASS_WATCH_WHILE_LAYOUT[pgIndex], loadPackageParam.classLoader), new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                Resources r = (Resources) callMethod(param.thisObject, "getResources");
+                int seekBarHeightId = r.getIdentifier("controls_overlay_bottom_ui_size", "dimen", SUPPORT_YOUTUBE_PACKAGE[pgIndex]);
+
+                hookDataHolder.seekBarHeight = seekBarHeightId > 0
+                            ? r.getDimensionPixelSize(seekBarHeightId)
+                            : (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 42f, r.getDisplayMetrics());
+                if (DEBUG) log(TAG + ": found seekBarHeight=" + hookDataHolder.seekBarHeight);
+            }
+        });
     }
 
     private static void hookYoutubeSwipeToSeek(XC_InitPackageResources.InitPackageResourcesParam resParam, int pgIndex) {
@@ -385,6 +413,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
             hookDataHolder = mHookDataHolder[pgIndex];
         }
 
+        // Hook vr button, detect its visibility to know if we're in 360 video
         try {
             XResources res = resParam.res;
             res.hookLayout(SUPPORT_YOUTUBE_PACKAGE[pgIndex], "layout", "vr_button", new XC_LayoutInflated() {
