@@ -45,6 +45,7 @@ public class SwipeDetector {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 if (isSwiping) mOnSwipe.onSwipeStop();
+                isSwiping = false;
                 isCanceled = false;
                 break;
 
