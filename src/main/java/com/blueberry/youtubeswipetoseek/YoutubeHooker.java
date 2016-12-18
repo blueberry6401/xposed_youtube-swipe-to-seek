@@ -63,7 +63,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
             "com.google.android.apps.ogyoutube.app.player.YouTubePlayerView"
     };
     private static final String[] CLASS_WATCH_WHILE_LAYOUT = new String[]{
-            "com.google.android.apps.youtube.app.ui.WatchWhileLayout",
+            "just_holder_real_value_is_set_below",
 //            "com.google.android.apps.youtube.gaming.player.GamingPlayerView",
             null
     };
@@ -139,6 +139,17 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                     @Override
                     protected void afterHookedMethod(final MethodHookParam param) throws Throwable {
                         Context c = (Context) callMethod(param.thisObject, "getApplicationContext");
+
+                        // Set WatchWhileLayout package path based on version
+                        if (pgIndex == 0) {
+                            int versionCode = c.getPackageManager().getPackageInfo(SUPPORT_YOUTUBE_PACKAGE[0], 0).versionCode / 1000;
+                            if (versionCode < 114755) {
+                                CLASS_WATCH_WHILE_LAYOUT[0] = "com.google.android.apps.youtube.app.ui.WatchWhileLayout";
+                            } else {
+                                CLASS_WATCH_WHILE_LAYOUT[0] = "com.google.android.apps.youtube.app.ui.watch.watchwhile.WatchWhileLayout";
+                            }
+                        }
+
                         c.registerReceiver(new BroadcastReceiver() {
                             @Override
                             public void onReceive(Context context, Intent intent) {
