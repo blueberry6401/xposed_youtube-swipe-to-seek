@@ -63,7 +63,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
             "com.google.android.apps.ogyoutube.app.player.YouTubePlayerView"
     };
     private static final String[] CLASS_WATCH_WHILE_LAYOUT = new String[]{
-            "just_holder_real_value_is_set_below",
+            "com.google.android.apps.youtube.app.ui.watch.watchwhile.WatchWhileLayout",
 //            "com.google.android.apps.youtube.gaming.player.GamingPlayerView",
             null
     };
@@ -289,6 +289,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
 
                                 // Bypass if user swipes from edge
                                 if (DEBUG) log(TAG + ": touched down, x=" + x + ", y=" + y);
+                                if (DEBUG) log(TAG + "edgesize:" + EDGE_SIZE + "; player w=" + hookDataHolder.youtubePlayerView.getWidth() + ", h=" + hookDataHolder.youtubePlayerView.getHeight() + "; seekbar height=" + hookDataHolder.seekBarHeight);
                                 return !(
                                         x < EDGE_SIZE
                                         || x > hookDataHolder.youtubePlayerView.getWidth() - EDGE_SIZE
@@ -350,6 +351,15 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                             }
                         };
                         hookDataHolder.youtubeVideoSwipeDetector = new SwipeDetector(c.getResources(), onYoutubeVideoSwipe);
+
+                        // Seek bar height
+                        Resources r = (Resources) callMethod(param.thisObject, "getResources");
+                        int seekBarHeightId = r.getIdentifier("controls_overlay_bottom_ui_size", "dimen", SUPPORT_YOUTUBE_PACKAGE[pgIndex]);
+
+                        hookDataHolder.seekBarHeight = seekBarHeightId > 0
+                                ? r.getDimensionPixelSize(seekBarHeightId)
+                                : (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 42f, r.getDisplayMetrics());
+                        if (DEBUG) log(TAG + ": found seekBarHeight=" + hookDataHolder.seekBarHeight);
                     }
                 });
 
@@ -389,7 +399,7 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (!param.thisObject.getClass().getName().equals(CLASS_WATCH_WHILE_LAYOUT[pgIndex])) {
-                            if (DEBUG) log(TAG + ": not WatchWhileLayout, " + param.thisObject.getClass().getSimpleName());
+//                            if (DEBUG) log(TAG + ": not WatchWhileLayout, " + param.thisObject.getClass().getSimpleName());
                             return;
                         }
 
@@ -399,19 +409,6 @@ public class YoutubeHooker implements IXposedHookLoadPackage, IXposedHookInitPac
                         hookDataHolder.youtubeVideoSwipeDetector.onEvent(motionEvent);
                     }
                 });
-        // Hook to get some needed values
-        hookAllConstructors(findClass(CLASS_WATCH_WHILE_LAYOUT[pgIndex], loadPackageParam.classLoader), new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                Resources r = (Resources) callMethod(param.thisObject, "getResources");
-                int seekBarHeightId = r.getIdentifier("controls_overlay_bottom_ui_size", "dimen", SUPPORT_YOUTUBE_PACKAGE[pgIndex]);
-
-                hookDataHolder.seekBarHeight = seekBarHeightId > 0
-                            ? r.getDimensionPixelSize(seekBarHeightId)
-                            : (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 42f, r.getDisplayMetrics());
-                if (DEBUG) log(TAG + ": found seekBarHeight=" + hookDataHolder.seekBarHeight);
-            }
-        });
     }
 
     private static void hookYoutubeSwipeToSeek(XC_InitPackageResources.InitPackageResourcesParam resParam, int pgIndex) {
